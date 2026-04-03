@@ -65,7 +65,7 @@ if st.button("Submit"):
     chunks = splitter.create_documents([transcript])
 
     # Vector DB (use Google Generative AI embeddings)
-    embeddings = GoogleGenerativeAIEmbeddings(model='models/text-embedding-004')
+    embeddings = GoogleGenerativeAIEmbeddings(model='gemini-embedding-001')
     vector_store = FAISS.from_documents(
         chunks,
         embeddings
