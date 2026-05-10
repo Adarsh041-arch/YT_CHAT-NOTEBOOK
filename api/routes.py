@@ -10,7 +10,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
 
-from src.rag_engine import RAGEngine
+from src.rag_engine import RAGEngine, PineconeRetriever
 from src.video_processor import process_video, VideoProcessingError, get_playlist_videos, extract_playlist_id, PlaylistError
 from src.database import get_db, SessionLocal, Video, ChatSession, ChatMessage, User
 from src.auth import get_password_hash, verify_password, create_access_token, get_current_user
@@ -52,10 +52,23 @@ def get_engine(video_id: str) -> RAGEngine:
     if video_id not in engine_store:
         engine = RAGEngine()
         try:
-            engine.load_or_ingest_transcript("", video_id)
+            engine._video_id = video_id
+            engine._index = engine._get_pinecone_index()
+            
+            if engine._namespace_exists(video_id):
+                engine._retriever = PineconeRetriever(
+                    index=engine._index,
+                    embedding_model=engine.embedding_model,
+                    video_id=video_id,
+                    top_k=2
+                )
+                engine._build_chain()
+                engine_store[video_id] = engine
+            else:
+                raise RuntimeError(f"Video not processed yet: {video_id}")
         except Exception as e:
-            print(f"Warning: Could not load FAISS index for {video_id}: {e}")
-        engine_store[video_id] = engine
+            print(f"Warning: Could not load Pinecone index for {video_id}: {e}")
+            raise RuntimeError(f"Video not processed. Please process the video first: {e}")
     return engine_store[video_id]
 
 
