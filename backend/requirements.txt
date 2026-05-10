@@ -4,8 +4,7 @@ pydantic==2.11.7
 python-dotenv==1.2.2
 python-multipart==0.0.20
 
-yt-dlp==2026.3.17
-requests==2.33.1
+google-api-python-client==2.149.0
 youtube-transcript-api==0.6.2
 
 motor==3.7.1

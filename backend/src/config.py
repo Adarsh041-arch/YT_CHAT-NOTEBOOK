@@ -13,19 +13,6 @@ class VideoConfig:
     """YouTube video processing settings."""
 
     SUPPORTED_LANGUAGES: Final[list[str]] = ["en", "hi", "en-US", "hi-IN"]
-    YDL_OPTIONS: Final[dict] = {
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["en", "hi"],
-        "quiet": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios"],
-                "po_token": os.environ.get("YOUTUBE_PO_TOKEN", "")
-            }
-        }
-    }
 
 
 class RAGConfig:
