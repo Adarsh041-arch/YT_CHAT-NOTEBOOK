@@ -9,8 +9,13 @@ from langchain_core.runnables import Runnable
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import (
+    create_history_aware_retriever,
+    create_retrieval_chain,
+)
+from langchain.chains.combine_documents import (
+    create_stuff_documents_chain,
+)
 from langchain_core.retrievers import BaseRetriever
 from pydantic import Field
 from sentence_transformers import SentenceTransformer
