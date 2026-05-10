@@ -26,7 +26,7 @@ INVIDIOUS_INSTANCES = [
 def get_invidious_url() -> str:
     for instance in INVIDIOUS_INSTANCES:
         try:
-            response = requests.get(f"{instance}/api/v1/trending", timeout=5)
+            response = requests.get(f"{instance}/api/v1/videos/dQw4w9WgXcQ", params={"fields": "videoId"}, timeout=5)
             if response.status_code == 200:
                 return instance
         except Exception:
@@ -94,87 +94,87 @@ def get_playlist_videos(playlist_url: str) -> List[dict]:
 
 
 def get_transcript_with_timestamps(video_id: str) -> tuple[List[dict], str]:
-    base_url = get_invidious_url()
-    
-    try:
-        response = requests.get(
-            f"{base_url}/api/v1/captions/{video_id}",
-            timeout=30
-        )
-        
-        if response.status_code != 200:
-            raise VideoProcessingError("No captions available")
-        
-        captions_data = response.json()
-        
-        if not captions_data or not isinstance(captions_data, list):
-            raise VideoProcessingError("No captions available")
-        
-        en_caption = None
-        for caption in captions_data:
-            lang_code = caption.get("languageCode", "")
-            if lang_code.startswith("en"):
-                en_caption = caption
-                break
-        
-        if not en_caption:
-            en_caption = captions_data[0]
-        
-        caption_id = en_caption.get("captionId")
-        if not caption_id:
-            raise VideoProcessingError("No caption ID found")
-        
-        transcript_response = requests.get(
-            f"{base_url}/api/v1/captions/{video_id}?caption_id={caption_id}",
-            timeout=30
-        )
-        
-        if transcript_response.status_code != 200:
-            raise VideoProcessingError("Failed to fetch transcript")
-        
-        transcript_text = transcript_response.text
-        
-        items = []
-        lines = transcript_text.split('\n')
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('WEBVTT'):
+    for base_url in INVIDIOUS_INSTANCES:
+        try:
+            response = requests.get(
+                f"{base_url}/api/v1/videos/{video_id}",
+                params={"fields": "captions"},
+                timeout=30
+            )
+            
+            if response.status_code != 200:
                 continue
             
-            parts = line.split(' --> ')
-            if len(parts) >= 2:
-                start_time = parts[0].strip()
-                text = parts[1].strip() if len(parts) > 1 else ""
+            data = response.json()
+            captions_data = data.get("captions", [])
+            
+            if not captions_data:
+                continue
+            
+            en_caption = None
+            for caption in captions_data:
+                lang_code = caption.get("languageCode", "")
+                if lang_code.startswith("en"):
+                    en_caption = caption
+                    break
+            
+            if not en_caption:
+                en_caption = captions_data[0]
+            
+            caption_id = en_caption.get("captionId")
+            if not caption_id:
+                continue
+            
+            transcript_response = requests.get(
+                f"{base_url}/api/v1/captions/{video_id}",
+                params={"caption_id": caption_id},
+                timeout=30
+            )
+            
+            if transcript_response.status_code != 200:
+                continue
+            
+            transcript_text = transcript_response.text
+            
+            items = []
+            lines = transcript_text.split('\n')
+            current_start = 0
+            
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('WEBVTT') or line.startswith('NOTE'):
+                    continue
                 
-                start_parts = start_time.split(':')
-                if len(start_parts) == 3:
-                    hours = int(start_parts[0])
-                    minutes = int(start_parts[1])
-                    seconds = float(start_parts[2])
-                    total_seconds = hours * 3600 + minutes * 60 + seconds
+                if ' --> ' in line:
+                    parts = line.split(' --> ')
+                    start_time = parts[0].strip()
+                    text = parts[1].strip() if len(parts) > 1 else ""
                     
-                    items.append({
-                        "text": text,
-                        "start": total_seconds,
-                        "duration": 3.0
-                    })
-            elif line:
-                items.append({
-                    "text": line,
-                    "start": None,
-                    "duration": None
-                })
-        
-        if not items:
-            raise VideoProcessingError("Empty transcript")
-        
-        lang = en_caption.get("languageCode", "en")
-        return items, lang[:2] if len(lang) > 2 else lang
-        
-    except VideoProcessingError:
-        raise
-    except Exception as e:
-        raise VideoProcessingError(f"Failed to fetch transcript: {str(e)}")
+                    start_parts = start_time.replace('.', ':').split(':')
+                    try:
+                        if len(start_parts) >= 3:
+                            hours = int(start_parts[0])
+                            minutes = int(start_parts[1])
+                            seconds = float(start_parts[2])
+                            current_start = hours * 3600 + minutes * 60 + seconds
+                    except (ValueError, IndexError):
+                        continue
+                    
+                    if text:
+                        items.append({
+                            "text": text,
+                            "start": current_start,
+                            "duration": 3.0
+                        })
+            
+            if items:
+                lang = en_caption.get("languageCode", "en")
+                return items, lang[:2] if len(lang) > 2 else lang
+                
+        except Exception:
+            continue
+    
+    raise VideoProcessingError("No captions available")
 
 
 def format_transcript(items: List[dict]) -> str:
