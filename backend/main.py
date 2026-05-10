@@ -17,8 +17,11 @@ from api.routes import router, engine_store
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     print("Starting YTChatBot API...")
-    await connect_to_mongodb()
-    print("Connected to MongoDB")
+    try:
+        await connect_to_mongodb()
+        print("MongoDB connected")
+    except Exception as e:
+        print("MongoDB startup failed:", e)
     yield
     print("Shutting down YTChatBot API...")
     await close_mongodb_connection()
