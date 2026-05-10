@@ -160,55 +160,9 @@ def clean_vtt(vtt_text: str) -> str:
     return " ".join(cleaned_lines).strip()
 
 
-def transcribe_audio_fallback(video_id: str) -> tuple[str, str]:
-    import whisper
-    
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'outtmpl': '%(id)s.%(ext)s',
-        'quiet': True,
-    }
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        raise VideoProcessingError(f"Failed to download audio: {e}")
-        
-    audio_file = f"{video_id}.mp3"
-    if not os.path.exists(audio_file):
-        raise VideoProcessingError("Audio download failed")
-        
-    try:
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_file)
-        
-        cleaned_lines = []
-        for segment in result["segments"]:
-            start = int(segment["start"])
-            h = start // 3600
-            m = (start % 3600) // 60
-            s = start % 60
-            timestamp = f"[{h:02d}:{m:02d}:{s:02d}]"
-            cleaned_lines.append(f"{timestamp} {segment['text'].strip()}")
-            
-        transcript = " ".join(cleaned_lines)
-        return transcript, result.get("language", "unknown")
-    finally:
-        if os.path.exists(audio_file):
-            os.remove(audio_file)
-
-
 def process_video(video_id: str) -> tuple[str, str]:
     """
     Full pipeline: validate, extract, download, and clean subtitles.
-    Falls back to Whisper audio transcription if subtitles are unavailable.
 
     Returns:
         tuple[str, str]: (cleaned_transcript, language_code)
@@ -216,13 +170,9 @@ def process_video(video_id: str) -> tuple[str, str]:
     if not validate_video_id(video_id):
         raise VideoProcessingError(f"Invalid video ID format: {video_id}")
 
-    try:
-        subtitle_url, lang = extract_subtitle_url(video_id)
-        raw_subtitle = download_subtitle(subtitle_url)
-        cleaned = clean_vtt(raw_subtitle)
-    except VideoProcessingError as e:
-        print(f"Subtitle extraction failed: {e}. Falling back to Whisper...")
-        cleaned, lang = transcribe_audio_fallback(video_id)
+    subtitle_url, lang = extract_subtitle_url(video_id)
+    raw_subtitle = download_subtitle(subtitle_url)
+    cleaned = clean_vtt(raw_subtitle)
 
     if not cleaned:
         raise VideoProcessingError("Subtitle processing resulted in empty text")

@@ -26,9 +26,6 @@ sentence-transformers==5.1.0
 # Database
 motor>=3.3.0
 
-# Audio Transcription Fallback
-openai-whisper>=20231117
-
 # Auth
 passlib[bcrypt]>=1.7.4
 PyJWT>=2.8.0

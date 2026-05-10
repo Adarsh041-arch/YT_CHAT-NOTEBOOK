@@ -195,9 +195,15 @@ class RAGEngine:
 
 class PineconeRetriever(BaseRetriever):
     index: object = Field(default=None)
-    embedding_model: object = Field(default=None)
     video_id: str = Field(default="")
     top_k: int = Field(default=5)
+    _embedding_model: Optional[SentenceTransformer] = None
+
+    @property
+    def embedding_model(self) -> SentenceTransformer:
+        if self._embedding_model is None:
+            self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        return self._embedding_model
 
     def _get_relevant_documents(self, query: str) -> List[Document]:
         query_embedding = self.embedding_model.encode(query).tolist()
