@@ -1,60 +1,120 @@
 """Database configuration and models."""
 
-from sqlalchemy import create_engine, Column, String, Integer, Text, ForeignKey, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+import os
 from datetime import datetime, timezone
 import uuid
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from .config import StorageConfig
 
-StorageConfig.ensure_dirs()
+client: AsyncIOMotorClient = None
+db: AsyncIOMotorDatabase = None
 
-engine = create_engine(
-    f"sqlite:///{StorageConfig.DB_PATH}",
-    connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
-    username = Column(String, unique=True, index=True)
-    password_hash = Column(String)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
+async def connect_to_mongodb():
+    global client, db
+    client = AsyncIOMotorClient(StorageConfig.MONGODB_URL)
+    db = client[StorageConfig.DATABASE_NAME]
+    
+    await db.users.create_index("username", unique=True)
+    await db.chat_sessions.create_index([("user_id", 1), ("created_at", -1)])
+    await db.chat_messages.create_index([("session_id", 1), ("created_at", 1)])
+    
+    return db
 
-class Video(Base):
-    __tablename__ = "videos"
-    id = Column(String, primary_key=True, index=True) # YouTube video ID
-    language = Column(String)
-    chunks_created = Column(Integer)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-class ChatSession(Base):
-    __tablename__ = "chat_sessions"
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
-    user_id = Column(String, ForeignKey("users.id"))
-    video_id = Column(String, ForeignKey("videos.id"))
-    title = Column(String, default="New Chat") # Optional title
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    user = relationship("User", back_populates="sessions")
-    video = relationship("Video")
-    messages = relationship("ChatMessage", back_populates="session", order_by="ChatMessage.created_at", cascade="all, delete-orphan")
+async def close_mongodb_connection():
+    global client
+    if client:
+        client.close()
 
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(String, ForeignKey("chat_sessions.id"))
-    role = Column(String) # "user" or "assistant"
-    content = Column(Text)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    session = relationship("ChatSession", back_populates="messages")
-
-Base.metadata.create_all(bind=engine)
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    return db
+
+
+class User:
+    @staticmethod
+    async def create(username: str, password_hash: str) -> dict:
+        return {
+            "id": str(uuid.uuid4()),
+            "username": username,
+            "password_hash": password_hash,
+            "created_at": datetime.now(timezone.utc)
+        }
+    
+    @staticmethod
+    async def find_by_username(username: str) -> dict | None:
+        return await db.users.find_one({"username": username})
+    
+    @staticmethod
+    async def find_by_id(user_id: str) -> dict | None:
+        return await db.users.find_one({"id": user_id})
+    
+    @staticmethod
+    async def insert(user: dict) -> None:
+        await db.users.insert_one(user)
+
+
+class Video:
+    @staticmethod
+    async def create(video_id: str, language: str, chunks_created: int) -> dict:
+        return {
+            "id": video_id,
+            "language": language,
+            "chunks_created": chunks_created,
+            "created_at": datetime.now(timezone.utc)
+        }
+    
+    @staticmethod
+    async def find_by_id(video_id: str) -> dict | None:
+        return await db.videos.find_one({"id": video_id})
+    
+    @staticmethod
+    async def insert(video: dict) -> None:
+        await db.videos.insert_one(video)
+
+
+class ChatSession:
+    @staticmethod
+    async def create(user_id: str, video_id: str, title: str = "New Chat") -> dict:
+        return {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "video_id": video_id,
+            "title": title,
+            "created_at": datetime.now(timezone.utc)
+        }
+    
+    @staticmethod
+    async def find_by_user(user_id: str) -> list:
+        cursor = db.chat_sessions.find({"user_id": user_id}).sort("created_at", -1)
+        return await cursor.to_list(length=None)
+    
+    @staticmethod
+    async def find_by_id(session_id: str) -> dict | None:
+        return await db.chat_sessions.find_one({"id": session_id})
+    
+    @staticmethod
+    async def insert(session: dict) -> str:
+        await db.chat_sessions.insert_one(session)
+        return session["id"]
+
+
+class ChatMessage:
+    @staticmethod
+    async def create(session_id: str, role: str, content: str) -> dict:
+        return {
+            "session_id": session_id,
+            "role": role,
+            "content": content,
+            "created_at": datetime.now(timezone.utc)
+        }
+    
+    @staticmethod
+    async def find_by_session(session_id: str) -> list:
+        cursor = db.chat_messages.find({"session_id": session_id}).sort("created_at", 1)
+        return await cursor.to_list(length=None)
+    
+    @staticmethod
+    async def insert(message: dict) -> None:
+        await db.chat_messages.insert_one(message)

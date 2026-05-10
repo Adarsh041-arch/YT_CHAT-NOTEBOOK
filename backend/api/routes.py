@@ -1,5 +1,6 @@
 """FastAPI routes for YTChatBot API."""
 
+import os
 import uuid
 import re
 from typing import List
@@ -7,12 +8,9 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
-from sqlalchemy.orm import Session
-from datetime import timedelta
-
 from src.rag_engine import RAGEngine, PineconeRetriever
 from src.video_processor import process_video, VideoProcessingError, get_playlist_videos, extract_playlist_id, PlaylistError
-from src.database import get_db, SessionLocal, Video, ChatSession, ChatMessage, User
+from src.database import Video, ChatSession, ChatMessage, User
 from src.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from langchain_core.messages import HumanMessage, AIMessage
 from .models import (
@@ -34,7 +32,6 @@ engine_store: dict[str, RAGEngine] = {}
 
 
 def extract_video_id(input_str: str) -> str:
-    """Extract video ID from YouTube URL or return as-is if already an ID."""
     patterns = [
         r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
         r'youtube\.com/shorts/([a-zA-Z0-9_-]{11})',
@@ -75,48 +72,47 @@ def get_engine(video_id: str) -> RAGEngine:
 # --- Auth Routes ---
 
 @router.post("/auth/register", response_model=Token)
-async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.username == user_data.username).first():
+async def register(user_data: UserCreate):
+    existing = await User.find_by_username(user_data.username)
+    if existing:
         raise HTTPException(status_code=400, detail="Username already registered")
     
     hashed_password = get_password_hash(user_data.password)
-    new_user = User(username=user_data.username, password_hash=hashed_password)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    new_user = await User.create(user_data.username, hashed_password)
+    await User.insert(new_user)
     
-    access_token = create_access_token(data={"sub": new_user.username})
+    access_token = create_access_token(data={"sub": new_user["username"]})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.post("/auth/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.password_hash):
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = await User.find_by_username(form_data.username)
+    if not user or not verify_password(form_data.password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(data={"sub": user.username})
+    access_token = create_access_token(data={"sub": user["username"]})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 # --- Video Routes ---
 
 @router.post("/process", response_model=ProcessVideoResponse)
-async def process_video_endpoint(request: ProcessVideoRequest, db: Session = Depends(get_db)):
+async def process_video_endpoint(request: ProcessVideoRequest):
     video_id = extract_video_id(request.video_id)
     if len(video_id) != 11:
         raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
 
-    existing_video = db.query(Video).filter(Video.id == video_id).first()
+    existing_video = await Video.find_by_id(video_id)
     if existing_video:
         return ProcessVideoResponse(
             video_id=video_id,
-            language=existing_video.language,
+            language=existing_video["language"],
             message="Video already processed",
-            chunks_created=existing_video.chunks_created,
+            chunks_created=existing_video["chunks_created"],
         )
 
     try:
@@ -126,9 +122,8 @@ async def process_video_endpoint(request: ProcessVideoRequest, db: Session = Dep
         engine_store[video_id] = engine
         chunks = len(transcript) // 1000 + 1
 
-        db_video = Video(id=video_id, language=language, chunks_created=chunks)
-        db.add(db_video)
-        db.commit()
+        db_video = await Video.create(video_id, language, chunks)
+        await Video.insert(db_video)
 
         return ProcessVideoResponse(
             video_id=video_id,
@@ -144,9 +139,7 @@ async def process_video_endpoint(request: ProcessVideoRequest, db: Session = Dep
 
 
 @router.post("/playlist/stream")
-async def process_playlist_stream(request: ProcessPlaylistRequest, db: Session = Depends(get_db)):
-    """Process playlist with real-time progress streaming."""
-
+async def process_playlist_stream(request: ProcessPlaylistRequest):
     playlist_id = extract_playlist_id(request.playlist_url)
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Invalid playlist URL")
@@ -166,10 +159,9 @@ async def process_playlist_stream(request: ProcessPlaylistRequest, db: Session =
 
         for idx, video in enumerate(videos):
             vid = video['video_id']
-
             yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total, 'title': video['title']})}\n\n"
 
-            existing = db.query(Video).filter(Video.id == vid).first()
+            existing = await Video.find_by_id(vid)
             if existing:
                 status = "already_loaded"
             else:
@@ -180,9 +172,8 @@ async def process_playlist_stream(request: ProcessPlaylistRequest, db: Session =
                     engine_store[vid] = engine
                     chunks = len(transcript) // 500 + 1
 
-                    db_video = Video(id=vid, language=language, chunks_created=chunks)
-                    db.add(db_video)
-                    db.commit()
+                    db_video = await Video.create(vid, language, chunks)
+                    await Video.insert(db_video)
                     status = "processed"
                     processed_count += 1
                 except Exception as e:
@@ -196,8 +187,6 @@ async def process_playlist_stream(request: ProcessPlaylistRequest, db: Session =
                 'status': status
             }
             video_infos.append(PlaylistVideoInfo(**video_info))
-            db.commit()
-
             yield f"data: {json.dumps({'type': 'video_done', 'video': video_info})}\n\n"
 
             if idx < total - 1:
@@ -216,9 +205,7 @@ async def process_playlist_stream(request: ProcessPlaylistRequest, db: Session =
 
 
 @router.post("/playlist", response_model=ProcessPlaylistResponse)
-async def process_playlist_endpoint(request: ProcessPlaylistRequest, db: Session = Depends(get_db)):
-    """Process all videos in a YouTube playlist."""
-
+async def process_playlist_endpoint(request: ProcessPlaylistRequest):
     playlist_id = extract_playlist_id(request.playlist_url)
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Invalid playlist URL")
@@ -235,7 +222,7 @@ async def process_playlist_endpoint(request: ProcessPlaylistRequest, db: Session
     for idx, video in enumerate(videos):
         vid = video['video_id']
 
-        existing = db.query(Video).filter(Video.id == vid).first()
+        existing = await Video.find_by_id(vid)
         if existing:
             status = "already_loaded"
         else:
@@ -246,9 +233,8 @@ async def process_playlist_endpoint(request: ProcessPlaylistRequest, db: Session
                 engine_store[vid] = engine
                 chunks = len(transcript) // 500 + 1
 
-                db_video = Video(id=vid, language=language, chunks_created=chunks)
-                db.add(db_video)
-                db.commit()
+                db_video = await Video.create(vid, language, chunks)
+                await Video.insert(db_video)
                 status = "processed"
                 processed_count += 1
             except Exception as e:
@@ -263,12 +249,6 @@ async def process_playlist_endpoint(request: ProcessPlaylistRequest, db: Session
             progress=f"{idx + 1}/{total}"
         ))
 
-        if idx < total - 1:
-            import asyncio
-            await asyncio.sleep(3)
-
-    db.commit()
-
     return ProcessPlaylistResponse(
         playlist_id=playlist_id,
         total_videos=total,
@@ -280,14 +260,10 @@ async def process_playlist_endpoint(request: ProcessPlaylistRequest, db: Session
 # --- Chat & Session Routes ---
 
 @router.post("/chat")
-async def chat_endpoint(
-    request: ChatRequest, 
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
-):
+async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_current_user)):
     video_id = extract_video_id(request.video_id)
 
-    existing_video = db.query(Video).filter(Video.id == video_id).first()
+    existing_video = await Video.find_by_id(video_id)
     if not existing_video:
         raise HTTPException(status_code=404, detail="Video not found. Please process the video first.")
 
@@ -295,27 +271,24 @@ async def chat_endpoint(
 
     session_id = request.session_id
     if session_id:
-        chat_session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
-        if not chat_session:
+        chat_session = await ChatSession.find_by_id(session_id)
+        if not chat_session or chat_session["user_id"] != current_user["id"]:
             raise HTTPException(status_code=404, detail="Chat session not found")
     else:
         title = request.question[:30] + "..." if len(request.question) > 30 else request.question
-        chat_session = ChatSession(user_id=current_user.id, video_id=video_id, title=title)
-        db.add(chat_session)
-        db.commit()
-        session_id = chat_session.id
+        new_session = await ChatSession.create(current_user["id"], video_id, title)
+        session_id = await ChatSession.insert(new_session)
 
-    history_msgs = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at).all()
+    history_msgs = await ChatMessage.find_by_session(session_id)
     chat_history = []
     for msg in history_msgs:
-        if msg.role == "user":
-            chat_history.append(HumanMessage(content=msg.content))
+        if msg["role"] == "user":
+            chat_history.append(HumanMessage(content=msg["content"]))
         else:
-            chat_history.append(AIMessage(content=msg.content))
+            chat_history.append(AIMessage(content=msg["content"]))
 
-    user_msg = ChatMessage(session_id=session_id, role="user", content=request.question)
-    db.add(user_msg)
-    db.commit()
+    user_msg = await ChatMessage.create(session_id, "user", request.question)
+    await ChatMessage.insert(user_msg)
 
     async def generate():
         full_answer = ""
@@ -332,58 +305,54 @@ async def chat_endpoint(
             yield error_msg
             full_answer = error_msg
         finally:
-            local_db = SessionLocal()
             try:
                 if full_answer and not full_answer.startswith("\n\nError:"):
-                    ai_msg = ChatMessage(session_id=session_id, role="assistant", content=full_answer)
-                    local_db.add(ai_msg)
-                    local_db.commit()
+                    ai_msg = await ChatMessage.create(session_id, "assistant", full_answer)
+                    await ChatMessage.insert(ai_msg)
             except Exception as ex:
                 print(f"Failed to save message: {ex}")
-            finally:
-                local_db.close()
 
     return StreamingResponse(generate(), media_type="text/plain", headers={"X-Session-ID": session_id})
 
 
 @router.get("/sessions", response_model=List[SessionInfo])
-async def get_user_sessions(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    sessions = db.query(ChatSession).filter(ChatSession.user_id == current_user.id).order_by(ChatSession.created_at.desc()).all()
+async def get_user_sessions(current_user: dict = Depends(get_current_user)):
+    sessions = await ChatSession.find_by_user(current_user["id"])
     result = []
     for s in sessions:
-        count = db.query(ChatMessage).filter(ChatMessage.session_id == s.id).count()
+        messages = await ChatMessage.find_by_session(s["id"])
         result.append(SessionInfo(
-            id=s.id,
-            video_id=s.video_id,
-            title=s.title,
-            created_at=s.created_at.isoformat(),
-            message_count=count
+            id=s["id"],
+            video_id=s["video_id"],
+            title=s["title"],
+            created_at=s["created_at"].isoformat(),
+            message_count=len(messages)
         ))
     return result
 
 
 @router.get("/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
-    if not session:
+async def get_session_messages(session_id: str, current_user: dict = Depends(get_current_user)):
+    session = await ChatSession.find_by_id(session_id)
+    if not session or session["user_id"] != current_user["id"]:
         raise HTTPException(status_code=404, detail="Session not found")
         
-    messages = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at).all()
-    return [{"role": m.role, "content": m.content} for m in messages]
+    messages = await ChatMessage.find_by_session(session_id)
+    return [{"role": m["role"], "content": m["content"]} for m in messages]
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check(db: Session = Depends(get_db)):
-    videos_loaded = db.query(Video).count()
-    return HealthResponse(status="healthy", videos_loaded=videos_loaded)
+async def health_check():
+    return HealthResponse(status="healthy", videos_loaded=0)
 
 
 @router.delete("/videos/{video_id}")
-async def delete_video(video_id: str, db: Session = Depends(get_db)):
-    video = db.query(Video).filter(Video.id == video_id).first()
+async def delete_video(video_id: str):
+    video = await Video.find_by_id(video_id)
     if video:
-        db.delete(video)
-        db.commit()
+        from src.database import get_db
+        db = get_db()
+        await db.videos.delete_one({"id": video_id})
         if video_id in engine_store:
             del engine_store[video_id]
         return {"message": f"Video {video_id} deleted"}
