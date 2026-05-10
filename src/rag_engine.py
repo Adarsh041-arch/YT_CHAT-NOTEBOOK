@@ -1,53 +1,47 @@
-"""RAG (Retrieval-Augmented Generation) engine for Q&A."""
+"""RAG Engine for YouTube Chatbot using Pinecone + sentence-transformers."""
 
 import os
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, List
 
 from langchain_core.documents import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import (
-    Runnable,
-    RunnableParallel,
-    RunnableLambda,
-    RunnablePassthrough,
-)
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import Runnable
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
-from langchain_ollama import OllamaEmbeddings
-from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.retrievers import BaseRetriever
+from pydantic import Field
+from sentence_transformers import SentenceTransformer
+from pinecone import Pinecone, ServerlessSpec
 
 from .config import RAGConfig, LLMConfig, StorageConfig
 
 
 class RAGEngine:
-    """RAG engine for processing transcripts and answering questions."""
+    """RAG engine using Pinecone + sentence-transformers."""
 
     def __init__(self) -> None:
-        self._embeddings: Optional[OllamaEmbeddings] = None
         self._llm: Optional[ChatOpenAI] = None
+        self._embedding_model: Optional[SentenceTransformer] = None
         self._retriever = None
         self._chain: Optional[Runnable] = None
         self._splitter = RecursiveCharacterTextSplitter(
-            chunk_size=RAGConfig.CHUNK_SIZE,
-            chunk_overlap=RAGConfig.CHUNK_OVERLAP,
+            chunk_size=500,
+            chunk_overlap=50,
         )
+        self._video_id: Optional[str] = None
+        self._index = None
 
     @property
-    def embeddings(self) -> OllamaEmbeddings:
-        """Lazy initialization of embeddings model."""
-        if self._embeddings is None:
-            self._embeddings = OllamaEmbeddings(
-                model=LLMConfig.EMBEDDING_MODEL
-            )
-        return self._embeddings
+    def embedding_model(self) -> SentenceTransformer:
+        if self._embedding_model is None:
+            self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        return self._embedding_model
 
     @property
     def llm(self) -> ChatOpenAI:
-        """Lazy initialization of chat model."""
         if self._llm is None:
             api_key = LLMConfig.OPENROUTER_API_KEY or os.environ.get("OPENROUTER_API_KEY", "")
             self._llm = ChatOpenAI(
@@ -61,46 +55,84 @@ class RAGEngine:
             )
         return self._llm
 
-    def load_or_ingest_transcript(self, transcript: str, video_id: str) -> None:
-        """
-        Load existing FAISS index or process transcript into vector store.
-        """
-        index_path = str(StorageConfig.FAISS_DIR / video_id)
+    def _get_pinecone_index(self):
+        pc = Pinecone(api_key=StorageConfig.PINECONE_API_KEY)
+        index_name = StorageConfig.PINECONE_INDEX_NAME
         
-        if os.path.exists(index_path):
-            vector_store = FAISS.load_local(
-                folder_path=index_path, 
-                embeddings=self.embeddings,
-                allow_dangerous_deserialization=True
+        if not pc.has_index(index_name):
+            pc.create_index(
+                name=index_name,
+                dimension=384,
+                metric="cosine",
+                spec=ServerlessSpec(cloud="aws", region="us-east-1")
             )
+        
+        return pc.Index(index_name)
+
+    def _namespace_exists(self, namespace: str) -> bool:
+        try:
+            stats = self._index.describe_index_stats()
+            namespaces = stats.get("namespaces", {})
+            if namespace in namespaces:
+                return namespaces[namespace].get("vector_count", 0) > 0
+            return False
+        except Exception:
+            return False
+
+    def load_or_ingest_transcript(self, transcript: str, video_id: str) -> None:
+        self._video_id = video_id
+        self._index = self._get_pinecone_index()
+        
+        transcript = transcript[:100000] if transcript else ""
+        
+        if self._namespace_exists(video_id):
+            print(f"Using cached namespace: {video_id}")
         else:
+            print(f"Ingesting transcript: {video_id}")
+            
             documents = self._splitter.create_documents(
-                texts=[transcript], metadatas=[{"video_id": video_id}]
+                texts=[transcript],
+                metadatas=[{"video_id": video_id}]
             )
-            vector_store = FAISS.from_documents(
-                documents=documents,
-                embedding=self.embeddings,
-            )
-            vector_store.save_local(index_path)
+            
+            texts = [doc.page_content for doc in documents]
+            embeddings = self.embedding_model.encode(texts).tolist()
+            
+            vectors = []
+            for i, (text, embedding) in enumerate(zip(texts, embeddings)):
+                vectors.append({
+                    "id": f"{video_id}_{i}",
+                    "values": embedding,
+                    "metadata": {
+                        "text": text,
+                        "video_id": video_id
+                    }
+                })
+            
+            for i in range(0, len(vectors), 50):
+                batch = vectors[i:i+50]
+                self._index.upsert(
+                    vectors=batch,
+                    namespace=video_id
+                )
+            
+            print(f"Indexed {len(vectors)} chunks")
 
-        self._retriever = vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": RAGConfig.TOP_K_RESULTS},
+        self._retriever = PineconeRetriever(
+            index=self._index,
+            embedding_model=self.embedding_model,
+            video_id=video_id,
+            top_k=RAGConfig.TOP_K_RESULTS
         )
-
         self._build_chain()
 
     def _build_chain(self) -> None:
-        """Build the RAG chain with conversational memory."""
         if self._retriever is None:
             raise RuntimeError("Retriever not initialized")
 
         contextualize_q_system_prompt = (
-            "Given a chat history and the latest user question "
-            "which might reference context in the chat history, "
-            "formulate a standalone question which can be understood "
-            "without the chat history. Do NOT answer the question, "
-            "just reformulate it if needed and otherwise return it as is."
+            "Given a chat history and the latest user question, "
+            "reformulate the question into a standalone question."
         )
         contextualize_q_prompt = ChatPromptTemplate.from_messages([
             ("system", contextualize_q_system_prompt),
@@ -115,13 +147,11 @@ class RAGEngine:
         qa_system_prompt = (
             "You are an expert, helpful assistant answering questions about a specific YouTube video.\n\n"
             "### Instructions:\n"
-            "1. **Use the Video Context**: Base your primary answer on the provided video context below. "
-            "IMPORTANT: The context contains timestamps in the format [HH:MM:SS]. "
-            "When pulling facts from the video, you MUST cite the exact timestamps inline.\n"
-            "2. **Avoid Robotic Phrasing**: Do NOT use phrases like 'as per the transcript', 'according to the provided text', or 'the transcript says'. You may use natural phrasing like 'based on the video' or simply state the facts directly.\n"
-            "3. **General Knowledge Fallback**: If the video context does not provide sufficient detail to fully answer the query, first provide whatever information IS available in the video. Then, you may provide your own general knowledge or suggestions to fully answer the user, BUT you MUST explicitly state that this additional information is a general suggestion and is not covered in the video.\n\n"
-            "### Video Context:\n"
-            "{context}"
+            "1. Use the Video Context: Base your answer on the provided video context below.\n"
+            "2. Cite timestamps when available.\n"
+            "3. Keep answers concise and natural.\n"
+            "4. If info is missing, state that additional knowledge is general knowledge.\n\n"
+            "Context:\n{context}"
         )
         qa_prompt = ChatPromptTemplate.from_messages([
             ("system", qa_system_prompt),
@@ -133,32 +163,20 @@ class RAGEngine:
         self._chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
     def answer(self, question: str, chat_history: list = None) -> str:
-        """Answer a question using the RAG pipeline."""
         if self._chain is None:
             raise RuntimeError("RAG engine not initialized")
-
         if chat_history is None:
             chat_history = []
-            
-        result = self._chain.invoke({
-            "input": question,
-            "chat_history": chat_history
-        })
+        result = self._chain.invoke({"input": question, "chat_history": chat_history})
         return result["answer"]
 
     async def aanswer_stream(self, question: str, chat_history: list = None) -> AsyncGenerator[str, None]:
-        """Stream the answer asynchronously."""
         if self._chain is None:
             raise RuntimeError("RAG engine not initialized")
-
         if chat_history is None:
             chat_history = []
-
         try:
-            async for chunk in self._chain.astream({
-                "input": question,
-                "chat_history": chat_history
-            }):
+            async for chunk in self._chain.astream({"input": question, "chat_history": chat_history}):
                 if "answer" in chunk:
                     yield chunk["answer"]
                 elif "context" in chunk:
@@ -172,5 +190,30 @@ class RAGEngine:
 
     @property
     def is_ready(self) -> bool:
-        """Check if RAG engine is ready for answering."""
         return self._chain is not None
+
+
+class PineconeRetriever(BaseRetriever):
+    index: object = Field(default=None)
+    embedding_model: object = Field(default=None)
+    video_id: str = Field(default="")
+    top_k: int = Field(default=5)
+
+    def _get_relevant_documents(self, query: str) -> List[Document]:
+        query_embedding = self.embedding_model.encode(query).tolist()
+        
+        results = self.index.query(
+            vector=query_embedding,
+            top_k=self.top_k,
+            include_metadata=True,
+            namespace=self.video_id
+        )
+        
+        docs = []
+        for match in results.matches:
+            text = match.metadata.get("text", "") if match.metadata else ""
+            docs.append(Document(page_content=text, metadata={"text": text}))
+        return docs
+
+    async def _aget_relevant_documents(self, query: str) -> List[Document]:
+        return self._get_relevant_documents(query)
