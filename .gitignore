@@ -45,4 +45,9 @@ htmlcov/
 
 # Node
 node_modules/
-frontend/node_modules/
+
+# Ruff
+.ruff_cache/
+
+# Backend virtual env
+backend/venv/
