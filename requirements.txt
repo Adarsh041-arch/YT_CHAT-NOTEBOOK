@@ -18,5 +18,17 @@ langchain>=0.2.0
 langchain-community>=0.2.0
 langchain-core>=0.2.0
 langchain-text-splitters>=0.2.0
-langchain-google-genai>=0.1.0
+langchain-ollama>=0.2.0
+langchain-openai>=0.2.0
 faiss-cpu>=1.8.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Audio Transcription Fallback
+openai-whisper>=20231117
+
+# Auth
+passlib[bcrypt]>=1.7.4
+PyJWT>=2.8.0
+python-multipart>=0.0.9

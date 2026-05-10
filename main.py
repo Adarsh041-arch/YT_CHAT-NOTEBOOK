@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import APIConfig
-from api.routes import router, video_store
+from api.routes import router, engine_store
 
 
 @asynccontextmanager
@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     print("Starting YTChatBot API...")
     yield
     print("Shutting down YTChatBot API...")
-    video_store.clear()
+    engine_store.clear()
 
 
 app = FastAPI(
