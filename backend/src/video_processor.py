@@ -1,8 +1,9 @@
-"""YouTube video subtitle extraction using youtube-transcript-api."""
+"""YouTube video subtitle extraction using Invidious API."""
 
 import re
+import json
+import requests
 from typing import Optional, List
-from youtube_transcript_api import YouTubeTranscriptApi
 
 from .config import VideoConfig
 
@@ -13,6 +14,24 @@ class VideoProcessingError(Exception):
 
 class PlaylistError(Exception):
     pass
+
+
+INVIDIOUS_INSTANCES = [
+    "https://invidious.snopyta.org",
+    "https://invidious.jingl.xyz",
+    "https://invidious.kavin.rocks",
+]
+
+
+def get_invidious_url() -> str:
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            response = requests.get(f"{instance}/api/v1/trending", timeout=5)
+            if response.status_code == 200:
+                return instance
+        except Exception:
+            continue
+    return INVIDIOUS_INSTANCES[0]
 
 
 def validate_video_id(video_id: str) -> bool:
@@ -75,41 +94,87 @@ def get_playlist_videos(playlist_url: str) -> List[dict]:
 
 
 def get_transcript_with_timestamps(video_id: str) -> tuple[List[dict], str]:
+    base_url = get_invidious_url()
+    
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        response = requests.get(
+            f"{base_url}/api/v1/captions/{video_id}",
+            timeout=30
+        )
         
-        transcript = transcript_list.find_transcript(['en', 'hi', 'en-US', 'hi-IN'])
+        if response.status_code != 200:
+            raise VideoProcessingError("No captions available")
         
-        if not transcript:
-            fetched = transcript_list.find_generated_transcript(['en', 'hi'])
-            if not fetched:
-                raise VideoProcessingError("No transcript available")
-            transcript = fetched[0]
+        captions_data = response.json()
         
-        transcript_data = transcript.fetch()
-        lang = transcript.language_code
+        if not captions_data or not isinstance(captions_data, list):
+            raise VideoProcessingError("No captions available")
+        
+        en_caption = None
+        for caption in captions_data:
+            lang_code = caption.get("languageCode", "")
+            if lang_code.startswith("en"):
+                en_caption = caption
+                break
+        
+        if not en_caption:
+            en_caption = captions_data[0]
+        
+        caption_id = en_caption.get("captionId")
+        if not caption_id:
+            raise VideoProcessingError("No caption ID found")
+        
+        transcript_response = requests.get(
+            f"{base_url}/api/v1/captions/{video_id}?caption_id={caption_id}",
+            timeout=30
+        )
+        
+        if transcript_response.status_code != 200:
+            raise VideoProcessingError("Failed to fetch transcript")
+        
+        transcript_text = transcript_response.text
         
         items = []
-        for item in transcript_data:
-            items.append({
-                "text": item["text"],
-                "start": item.get("start"),
-                "duration": item.get("duration")
-            })
+        lines = transcript_text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('WEBVTT'):
+                continue
+            
+            parts = line.split(' --> ')
+            if len(parts) >= 2:
+                start_time = parts[0].strip()
+                text = parts[1].strip() if len(parts) > 1 else ""
+                
+                start_parts = start_time.split(':')
+                if len(start_parts) == 3:
+                    hours = int(start_parts[0])
+                    minutes = int(start_parts[1])
+                    seconds = float(start_parts[2])
+                    total_seconds = hours * 3600 + minutes * 60 + seconds
+                    
+                    items.append({
+                        "text": text,
+                        "start": total_seconds,
+                        "duration": 3.0
+                    })
+            elif line:
+                items.append({
+                    "text": line,
+                    "start": None,
+                    "duration": None
+                })
         
-        return items, lang
+        if not items:
+            raise VideoProcessingError("Empty transcript")
         
+        lang = en_caption.get("languageCode", "en")
+        return items, lang[:2] if len(lang) > 2 else lang
+        
+    except VideoProcessingError:
+        raise
     except Exception as e:
-        error_msg = str(e)
-        if "video_unavailable" in error_msg.lower():
-            raise VideoProcessingError("Video unavailable")
-        if "transcript" in error_msg.lower() and "disabled" in error_msg.lower():
-            raise VideoProcessingError("Transcripts disabled for this video")
-        if "no transcript" in error_msg.lower():
-            raise VideoProcessingError("No transcript available for this video")
-        if "429" in error_msg or "rate" in error_msg.lower():
-            raise VideoProcessingError("Rate limited - try again later")
-        raise VideoProcessingError(f"Failed to fetch transcript: {error_msg}")
+        raise VideoProcessingError(f"Failed to fetch transcript: {str(e)}")
 
 
 def format_transcript(items: List[dict]) -> str:
