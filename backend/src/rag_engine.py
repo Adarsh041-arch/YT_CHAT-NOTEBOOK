@@ -33,8 +33,8 @@ class RAGEngine:
         self._retriever = None
         self._chain: Optional[Runnable] = None
         self._splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50,
+            chunk_size=1000,
+            chunk_overlap=100,
         )
         self._video_id: Optional[str] = None
         self._index = None
@@ -154,8 +154,11 @@ class RAGEngine:
             "### Instructions:\n"
             "1. Use the Video Context: Base your answer on the provided video context below.\n"
             "2. Cite timestamps when available.\n"
-            "3. Keep answers concise and natural.\n"
-            "4. If info is missing, state that additional knowledge is general knowledge.\n\n"
+            "3. Keep answers concise,natural and as per the tone of the speaker in the video based on the transcript.\n"
+            "4. The tone should also change as per the genere of the video , but mostly explainatory.\n"
+            "5. Try to preserve the unique talking\explaining style of the speaker in the transcript. \n"
+            "6.If the user asks for details but not available in the video try to answer on your own but also keep the contents of the video in loop. \n"
+            "7. If info is missing, state that additional knowledge is general knowledge.\n\n"
             "Context:\n{context}"
         )
         qa_prompt = ChatPromptTemplate.from_messages([

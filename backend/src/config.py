@@ -18,9 +18,9 @@ class VideoConfig:
 class RAGConfig:
     """RAG pipeline settings."""
 
-    CHUNK_SIZE: Final[int] = 500
-    CHUNK_OVERLAP: Final[int] = 50
-    TOP_K_RESULTS: Final[int] = 2
+    CHUNK_SIZE: Final[int] = 1000
+    CHUNK_OVERLAP: Final[int] = 100
+    TOP_K_RESULTS: Final[int] = 4
 
 
 class LLMConfig:
