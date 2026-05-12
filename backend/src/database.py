@@ -3,6 +3,7 @@
 import os
 from datetime import datetime, timezone
 import uuid
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from .config import StorageConfig
 
@@ -12,7 +13,7 @@ db: AsyncIOMotorDatabase = None
 
 async def connect_to_mongodb():
     global client, db
-    client = AsyncIOMotorClient(StorageConfig.MONGODB_URL)
+    client = AsyncIOMotorClient(StorageConfig.MONGODB_URL,tls=True,tlsCAFile=certifi.where())
     db = client[StorageConfig.DATABASE_NAME]
     
     await db.users.create_index("username", unique=True)
