@@ -215,6 +215,24 @@ You can deploy the FastAPI backend on hosting providers such as [Render](https:/
 
 ---
 
+## Performance & Latency Benchmarks
+
+The query and retrieval pipeline has been benchmarked using the local `all-MiniLM-L6-v2` embedding model and Pinecone serverless indexes.
+
+### Benchmark Setup
+- **Embedding Model**: `SentenceTransformer("all-MiniLM-L6-v2")` (384-dimensional dense vectors)
+- **Vector Database**: Pinecone serverless index (`ytchatbot`)
+- **Sample Query**: *"What is the main topic of the video?"*
+- **Database Namespace**: Isolated by YouTube Video ID (tested with namespace containing 100 chunks)
+
+### Latency Profiles
+- **Local Embedding Latency**: ~`140.57 ms` (text-to-vector encoding on CPU)
+- **Pinecone Search Latency (Cold/Warm-up Run)**: ~`350.61 ms`
+- **Pinecone Search Latency (Warm/Average)**: ~`264.76 ms`
+- **Total End-to-End Retrieval Overhead**: **~`350 ms - 400 ms`**
+
+---
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
