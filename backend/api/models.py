@@ -88,3 +88,102 @@ class ProcessPlaylistResponse(BaseModel):
     total_videos: int
     videos: list[PlaylistVideoInfo]
     message: str
+
+
+class PlaylistLoadResponse(BaseModel):
+    playlist_id: str
+    total: int
+    succeeded: list[str]
+    failed: list[dict]
+    videos: list[dict]
+    relation_graph: dict
+
+
+class PlaylistQueryRequest(BaseModel):
+    playlist_id: str = Field(..., description="YouTube playlist ID")
+    question: str = Field(..., min_length=1, description="Question about the playlist")
+    session_id: str | None = Field(None, description="Optional chat session ID")
+
+
+class PlaylistInfo(BaseModel):
+    """Summary info for a processed playlist."""
+    playlist_id: str
+    total_videos: int
+    created_at: str
+
+
+class VisualizationRequest(BaseModel):
+    video_id: str
+    question: str
+    answer: str = ""
+
+
+# ── Visualization Spec Models ─────────────────────────────────────
+
+class VizChartDataPoint(BaseModel):
+    label: str
+    value: float
+
+class VizChart(BaseModel):
+    type: str = "chart"
+    chartType: str  # "bar" | "line" | "scatter" | "pie"
+    title: str
+    data: list[VizChartDataPoint]
+    xLabel: str = ""
+    yLabel: str = ""
+
+class VizGraphNode(BaseModel):
+    id: str
+    label: str
+
+class VizGraphEdge(BaseModel):
+    source: str
+    target: str
+    label: str | None = None
+
+class VizGraph(BaseModel):
+    type: str = "graph"
+    title: str
+    nodes: list[VizGraphNode]
+    edges: list[VizGraphEdge]
+    layout: str = "force"  # "force" | "tree" | "radial"
+
+class VizSimulationStep(BaseModel):
+    description: str
+    state: dict = {}
+
+class VizSimulation(BaseModel):
+    type: str = "simulation"
+    simType: str  # "particles" | "physics" | "algorithm-steps"
+    title: str
+    params: dict = {}
+    steps: list[VizSimulationStep] | None = None
+
+class VizDiagram(BaseModel):
+    type: str = "diagram"
+    diagramType: str  # "flowchart" | "sequence"
+    mermaidSyntax: str
+
+class VizCustom(BaseModel):
+    type: str = "custom"
+    title: str
+    code: str
+
+
+class LogValidationRequest(BaseModel):
+    video_id: str
+    query: str
+    category: str
+    spec: dict
+    validation_error: str | None = None
+
+
+class RegenerateVisualizationRequest(BaseModel):
+    video_id: str
+    query: str
+    category: str
+    failed_code: str
+    error_message: str
+
+
+
