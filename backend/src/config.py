@@ -61,13 +61,13 @@ class VizConfig:
 
     CLASSIFIER_MODEL: Final[str] = os.environ.get(
         "CLASSIFIER_MODEL",
-        "gemini-2.5-flash" if os.environ.get("LLM_PROVIDER") == "gemini" else "openai/gpt-4o-mini"
+        "gemini-2.5-flash" if os.environ.get("LLM_PROVIDER") == "gemini" else os.environ.get("LLM_MODEL", "nvidia/nemotron-3.5-lightning:free")
     )
     SPEC_GEN_MODEL: Final[str] = os.environ.get(
         "SPEC_GEN_MODEL",
-        "gemini-2.5-flash" if os.environ.get("LLM_PROVIDER") == "gemini" else "openai/gpt-4o-mini"
+        "gemini-2.5-flash" if os.environ.get("LLM_PROVIDER") == "gemini" else os.environ.get("LLM_MODEL", "nvidia/nemotron-3.5-lightning:free")
     )
-    CLASSIFIER_MAX_TOKENS: Final[int] = 10
+    CLASSIFIER_MAX_TOKENS: Final[int] = 100
     SPEC_GEN_MAX_TOKENS: Final[int] = 4096
     CLASSIFIER_TEMPERATURE: Final[float] = 0.0
 

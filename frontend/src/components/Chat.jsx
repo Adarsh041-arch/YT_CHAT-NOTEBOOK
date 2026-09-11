@@ -175,6 +175,7 @@ export default function Chat({ currentVideo, currentVideoTitle, chatHistory, set
 
   const handleGenerateVisualization = async (msgIdx) => {
     setGeneratingVizIdx(msgIdx);
+    setError(null);
     try {
       let question = '';
       for (let i = msgIdx - 1; i >= 0; i--) {
@@ -182,6 +183,9 @@ export default function Chat({ currentVideo, currentVideoTitle, chatHistory, set
           question = chatHistory[i].content;
           break;
         }
+      }
+      if (!question && chatHistory[msgIdx]?.content) {
+        question = chatHistory[msgIdx].content.slice(0, 150);
       }
       const spec = await api.generateVisualization(
         currentVideo,
@@ -195,9 +199,13 @@ export default function Chat({ currentVideo, currentVideoTitle, chatHistory, set
           updated[msgIdx] = { ...updated[msgIdx], visualization: spec };
           return updated;
         });
+        setActiveViz(spec);
+      } else {
+        setError('No visualization could be generated for this message. Please try asking a more specific question.');
       }
     } catch (err) {
       console.error('Failed to generate visualization:', err);
+      setError(`Failed to generate visualization: ${err.message}`);
     } finally {
       setGeneratingVizIdx(null);
     }

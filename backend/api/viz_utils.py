@@ -12,7 +12,7 @@ from src.tracing import traceable
 from .models import VizChart, VizGraph, VizSimulation, VizDiagram, VizCustom
 
 
-def _get_viz_llm(model_override: str | None = None, max_tokens: int = 10, temperature: float = 0.0):
+def _get_viz_llm(model_override: str | None = None, max_tokens: int = 100, temperature: float = 0.0):
     from langchain_openai import ChatOpenAI
     provider = getattr(LLMConfig, "LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "openrouter")).lower()
     if provider == "nvidia":
@@ -40,52 +40,48 @@ def _get_viz_llm(model_override: str | None = None, max_tokens: int = 10, temper
         model=model_override or VizConfig.CLASSIFIER_MODEL,
         temperature=temperature,
         max_tokens=max_tokens,
+        extra_body={"reasoning": {"effort": "none"}},
     )
 
 
 CLASSIFIER_PROMPT = (
-    "You are deciding whether a visualization would help answer this question.\n\n"
-    "User query: {query}\n"
-    "Retrieved context: {context}\n\n"
+    "You are choosing the best visualization type to illustrate and explain the following concept.\n\n"
+    "Topic/Query: {query}\n"
+    "Context: {context}\n\n"
     "Categories:\n"
-    "- none: factual/definitional question, text explanation is sufficient\n"
-    "- chart: comparing numbers/values, time trends, distributions, percentages, numeric data sets\n"
-    "- graph: networks, connections, ontologies, hierarchies, node-link relations, family trees\n"
-    "- custom: dynamic step-by-step processes, algorithm executions/simulations (e.g. backpropagation, sorting), physical movements, custom canvas drawings\n"
-    "- diagram: software architecture, state diagrams, logical flow charts, sequence diagrams\n\n"
+    "- custom: dynamic step-by-step processes, interactive simulations, algorithm executions (e.g. neural networks, weights/training, sorting, physics, math animations)\n"
+    "- diagram: software architecture, state diagrams, logical workflows, process pipelines, flowcharts, sequence diagrams\n"
+    "- graph: networks, node connections, ontologies, hierarchies, concept maps\n"
+    "- chart: numerical comparisons, distributions, data points, statistics, proportions\n\n"
     "Rules:\n"
-    "1. Categorize strictly. Output exactly one word from ('none', 'chart', 'graph', 'custom', 'diagram').\n"
-    "2. If the user explicitly asks to 'simulate', 'show a simulation', 'animate', 'draw', 'chart', 'graph', 'diagram', 'flowchart', or 'visualize' a process/algorithm/data, classify it under the appropriate category (e.g. 'custom' for simulations/animations, 'diagram' for flowcharts/sequence diagrams, 'chart' for charts, 'graph' for network graphs) instead of 'none'.\n"
-    "3. If it is a basic factual or text-only query without any explicit request for visualization or process flow, classify as 'none'.\n\n"
-    "Examples:\n"
-    "Query: 'Can you show the percentage of views by country?' -> chart\n"
-    "Query: 'Draw a dependency network of these classes.' -> graph\n"
-    "Query: 'How does backpropagation change weights step-by-step?' -> custom\n"
-    "Query: 'Create a process flow of RAG pipeline.' -> diagram\n"
-    "Query: 'Show a simulation of neural network training steps.' -> custom\n"
-    "Query: 'What is a neural network?' -> none\n\n"
-    "Respond with only the category name (one of: none, chart, graph, custom, diagram) in lowercase, nothing else."
+    "1. Choose the single best category from ('custom', 'diagram', 'graph', 'chart').\n"
+    "2. For processes, algorithms, neural networks, learning steps, or dynamic changes over time, choose 'custom'.\n"
+    "3. For architectures, steps, sequences, pipelines, or logical flows, choose 'diagram'.\n"
+    "4. For interconnected concepts, hierarchies, or networks, choose 'graph'.\n"
+    "5. For numerical data or statistics, choose 'chart'.\n\n"
+    "Respond with only the category name (one of: custom, diagram, graph, chart) in lowercase, nothing else."
 )
 
 
 @traceable(run_type="chain", name="classify_visualization")
 async def classify_visualization(query: str, context_chunks: list[str]) -> str:
-    """Returns one of: none, chart, graph, simulation, diagram, custom."""
+    """Returns one of: custom, diagram, graph, chart, simulation."""
     context_str = "\n\n".join(c[:800] for c in context_chunks[:5])
     llm = _get_viz_llm(max_tokens=VizConfig.CLASSIFIER_MAX_TOKENS, temperature=VizConfig.CLASSIFIER_TEMPERATURE)
     messages = [
-        SystemMessage(content="You are a classifier. Output exactly one word."),
+        SystemMessage(content="You are a classifier. Output exactly one word from: custom, diagram, graph, chart."),
         HumanMessage(content=CLASSIFIER_PROMPT.format(query=query, context=context_str)),
     ]
     try:
         response = await llm.ainvoke(messages)
-        category = response.content.strip().lower()
-        if category in ("chart", "graph", "simulation", "diagram", "custom"):
-            return category
-        return "none"
+        content = response.content.strip().lower()
+        for cat in ("custom", "simulation", "diagram", "graph", "chart"):
+            if cat in content:
+                return "custom" if cat == "simulation" else cat
+        return "diagram"
     except Exception as e:
         print(f"[viz] Classifier error: {e}")
-        return "none"
+        return "diagram"
 
 
 SPEC_PROMPTS = {

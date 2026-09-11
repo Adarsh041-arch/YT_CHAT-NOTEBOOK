@@ -617,18 +617,26 @@ async def generate_visualization(request: VisualizationRequest, current_user: di
                 include_metadata=True,
                 namespace=video_id,
             )
-            context_chunks = [m.metadata.get("text", "")[:800] for m in nr.matches if m.metadata]
+        if not context_chunks and request.answer:
+            context_chunks = [request.answer[:1200]]
     except Exception as e:
         print(f"[visualize] Context fetch error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve context: {e}")
+        if request.answer:
+            context_chunks = [request.answer[:1200]]
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve context: {e}")
 
     # Classify
     category = await classify_visualization(request.question, context_chunks)
     if category == "none":
-        return {"type": "none"}
+        category = "diagram"
 
     # Generate high-quality spec
     spec = await generate_viz_spec(category, request.question, context_chunks)
+    if not spec and category != "diagram":
+        print(f"[visualize] {category} spec generation failed, falling back to diagram")
+        spec = await generate_viz_spec("diagram", request.question, context_chunks)
+
     if not spec:
         raise HTTPException(status_code=500, detail="Failed to generate visualization spec")
 
