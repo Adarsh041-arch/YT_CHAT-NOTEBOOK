@@ -39,7 +39,7 @@ class LLMConfig:
     # NVIDIA
     NVIDIA_API_KEY: Final[str] = os.environ.get("NVIDIA_API_KEY", "")
     NVIDIA_BASE_URL: Final[str] = "https://integrate.api.nvidia.com/v1"
-    NVIDIA_MODEL: Final[str] = os.environ.get("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct")
+    NVIDIA_MODEL: Final[str] = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
     # Google Gemini (compatible with OpenAI format)
     GOOGLE_API_KEY: Final[str] = os.environ.get("GOOGLE_API_KEY", "")
