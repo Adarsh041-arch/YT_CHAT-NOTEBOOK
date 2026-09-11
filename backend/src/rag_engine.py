@@ -58,41 +58,21 @@ class RAGEngine:
     @property
     def llm(self):
         if self._llm is None:
-            from langchain_openai import ChatOpenAI
-
-            if LLMConfig.LLM_PROVIDER == "nvidia":
-                api_key = LLMConfig.NVIDIA_API_KEY or os.environ.get("NVIDIA_API_KEY", "")
-                self._llm = ChatOpenAI(
-                    base_url=LLMConfig.NVIDIA_BASE_URL,
-                    api_key=api_key,
-                    model=LLMConfig.NVIDIA_MODEL,
-                    temperature=LLMConfig.TEMPERATURE,
-                    top_p=LLMConfig.TOP_P,
-                    max_tokens=LLMConfig.MAX_TOKENS,
-                    streaming=True,
-                )
-            elif LLMConfig.LLM_PROVIDER == "gemini":
-                api_key = LLMConfig.GOOGLE_API_KEY or os.environ.get("GOOGLE_API_KEY", "")
-                from langchain_google_genai import ChatGoogleGenerativeAI
-                self._llm = ChatGoogleGenerativeAI(
-                    google_api_key=api_key,
-                    model=LLMConfig.MODEL,
-                    temperature=LLMConfig.TEMPERATURE,
-                    top_p=LLMConfig.TOP_P,
-                    max_output_tokens=LLMConfig.MAX_TOKENS,
-                    streaming=True,
-                )
-            else:
-                api_key = LLMConfig.OPENROUTER_API_KEY or os.environ.get("OPENROUTER_API_KEY", "")
-                self._llm = ChatOpenAI(
-                    base_url=LLMConfig.OPENROUTER_BASE_URL,
-                    api_key=api_key,
-                    model=LLMConfig.MODEL,
-                    temperature=LLMConfig.TEMPERATURE,
-                    top_p=LLMConfig.TOP_P,
-                    max_tokens=LLMConfig.MAX_TOKENS,
-                    streaming=True,
-                )
+            api_key = LLMConfig.OPENROUTER_API_KEY or os.environ.get("OPENROUTER_API_KEY", "")
+            self._llm = ChatOpenAI(
+                base_url=LLMConfig.OPENROUTER_BASE_URL,
+                api_key=api_key,
+                model=LLMConfig.MODEL,
+                temperature=LLMConfig.TEMPERATURE,
+                top_p=LLMConfig.TOP_P,
+                max_tokens=LLMConfig.MAX_TOKENS,
+                streaming=True,
+                extra_body={
+                "reasoning": {
+                    "effort": "none"
+                }
+            }
+            )
         return self._llm
 
     def _get_pinecone_index(self):
@@ -328,6 +308,5 @@ class PineconeRetriever(BaseRetriever):
             docs.append(Document(page_content=text, metadata={"text": text}))
         return docs
 
-    async def _aget_relevant_documents(self, query: str) -> list:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_relevant_documents, query)
+    async def _aget_relevant_documents(self, query: str) -> List[Document]:
+        return self._get_relevant_documents(query)

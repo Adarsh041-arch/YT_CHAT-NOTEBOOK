@@ -26,9 +26,7 @@ class RAGConfig:
 class LLMConfig:
     """LLM settings."""
 
-    LLM_PROVIDER: Final[str] = os.environ.get("LLM_PROVIDER", "openrouter")
-
-    MODEL: Final[str] = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
+    MODEL: Final[str] = "nvidia/nemotron-3.5-lightning:free"
     EMBEDDING_MODEL: Final[str] = "all-MiniLM-L6-v2"
     TEMPERATURE: Final[float] = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
     TOP_P: Final[float] = float(os.environ.get("LLM_TOP_P", "0.9"))
