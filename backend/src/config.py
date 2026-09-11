@@ -26,7 +26,7 @@ class RAGConfig:
 class LLMConfig:
     """LLM settings."""
 
-    MODEL: Final[str] = "openai/gpt-5.2"
+    MODEL: Final[str] = "meta-llama/llama-3-8b-instruct:free"
     EMBEDDING_MODEL: Final[str] = "all-MiniLM-L6-v2"
     TEMPERATURE: Final[float] = 0.7
     TOP_P: Final[float] = 0.9
