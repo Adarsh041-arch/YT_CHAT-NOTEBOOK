@@ -1,5 +1,6 @@
 """Authentication utilities."""
 
+import os
 from datetime import datetime, timedelta, timezone
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -7,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer
 from .database import get_db, User
 
 # In production, this should be in an environment variable!
-SECRET_KEY = "ytchatbot_super_secret_key"
+SECRET_KEY = os.environ.get("SECRET_KEY", "ytchatbot_super_secret_jwt_key_at_least_32_bytes_long_12345")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 

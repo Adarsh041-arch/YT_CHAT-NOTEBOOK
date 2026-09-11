@@ -58,6 +58,7 @@ class RAGEngine:
     @property
     def llm(self):
         if self._llm is None:
+            from langchain_openai import ChatOpenAI
             api_key = LLMConfig.OPENROUTER_API_KEY or os.environ.get("OPENROUTER_API_KEY", "")
             self._llm = ChatOpenAI(
                 base_url=LLMConfig.OPENROUTER_BASE_URL,
