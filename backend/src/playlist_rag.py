@@ -49,7 +49,8 @@ class PlaylistRAG:
             from langchain_openai import ChatOpenAI
             from .config import LLMConfig
             import os
-            if LLMConfig.LLM_PROVIDER == "nvidia":
+            provider = getattr(LLMConfig, "LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "openrouter")).lower()
+            if provider == "nvidia":
                 self._llm = ChatOpenAI(
                     base_url=LLMConfig.NVIDIA_BASE_URL,
                     api_key=LLMConfig.NVIDIA_API_KEY or os.environ.get("NVIDIA_API_KEY", ""),
@@ -59,7 +60,7 @@ class PlaylistRAG:
                     max_tokens=LLMConfig.MAX_TOKENS,
                     streaming=True,
                 )
-            elif LLMConfig.LLM_PROVIDER == "gemini":
+            elif provider == "gemini":
                 from langchain_google_genai import ChatGoogleGenerativeAI
                 self._llm = ChatGoogleGenerativeAI(
                     google_api_key=LLMConfig.GOOGLE_API_KEY or os.environ.get("GOOGLE_API_KEY", ""),

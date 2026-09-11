@@ -14,7 +14,8 @@ from .models import VizChart, VizGraph, VizSimulation, VizDiagram, VizCustom
 
 def _get_viz_llm(model_override: str | None = None, max_tokens: int = 10, temperature: float = 0.0):
     from langchain_openai import ChatOpenAI
-    if LLMConfig.LLM_PROVIDER == "nvidia":
+    provider = getattr(LLMConfig, "LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "openrouter")).lower()
+    if provider == "nvidia":
         return ChatOpenAI(
             base_url=LLMConfig.NVIDIA_BASE_URL,
             api_key=LLMConfig.NVIDIA_API_KEY or os.environ.get("NVIDIA_API_KEY", ""),
@@ -22,7 +23,7 @@ def _get_viz_llm(model_override: str | None = None, max_tokens: int = 10, temper
             temperature=temperature,
             max_tokens=max_tokens,
         )
-    elif LLMConfig.LLM_PROVIDER == "gemini":
+    elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
         # Google's Gemini API has a bug where passing a very small max_output_tokens (like 10)
         # causes it to return an empty string. Keep it at least 100 to avoid empty responses.
