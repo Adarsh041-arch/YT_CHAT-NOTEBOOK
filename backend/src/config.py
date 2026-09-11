@@ -26,7 +26,7 @@ class RAGConfig:
 class LLMConfig:
     """LLM settings."""
 
-    MODEL: Final[str] = "meta-llama/llama-3-8b-instruct:free"
+    MODEL: Final[str] = "nvidia/nemotron-3.5-lightning:free"
     EMBEDDING_MODEL: Final[str] = "all-MiniLM-L6-v2"
     TEMPERATURE: Final[float] = 0.7
     TOP_P: Final[float] = 0.9
