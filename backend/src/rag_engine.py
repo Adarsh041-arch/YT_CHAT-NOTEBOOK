@@ -57,6 +57,11 @@ class RAGEngine:
                 top_p=LLMConfig.TOP_P,
                 max_tokens=LLMConfig.MAX_TOKENS,
                 streaming=True,
+                extra_body={
+                "reasoning": {
+                    "effort": "none"
+                }
+            }
             )
         return self._llm
 
